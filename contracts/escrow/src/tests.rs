@@ -25,6 +25,7 @@ fn setup() -> (Env, Address, Address, Address, Address, Address, Address) {
     let contract_id = env.register(EscrowContract, ());
     let client = EscrowContractClient::new(&env, &contract_id);
     client.initialize(&oracle, &admin);
+    client.add_allowed_token(&token_addr);
 
     (
         env,
