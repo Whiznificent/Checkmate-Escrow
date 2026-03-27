@@ -1647,3 +1647,36 @@ fn test_get_escrow_balance_returns_match_not_found_for_nonexistent_id() {
         "get_escrow_balance must return MatchNotFound for a non-existent match_id"
     );
 }
+
+#[test]
+fn test_create_match_with_max_stake_amount() {
+    let (env, contract_id, oracle, player1, player2, token_addr, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Mint i128::MAX to both players so deposit doesn't fail on balance
+    let asset_client = StellarAssetClient::new(&env, &token_addr);
+    asset_client.mint(&player1, &i128::MAX);
+    asset_client.mint(&player2, &i128::MAX);
+
+    // create_match with i128::MAX stake must succeed — no overflow at creation time
+    let id = client.create_match(
+        &player1,
+        &player2,
+        &i128::MAX,
+        &token_addr,
+        &String::from_str(&env, "maxstake1"),
+        &Platform::Lichess,
+    );
+
+    // Both players deposit
+    client.deposit(&id, &player1);
+    client.deposit(&id, &player2);
+
+    // submit_result must return Error::Overflow because pot = i128::MAX * 2 overflows
+    let result = client.try_submit_result(&id, &Winner::Player1, &oracle);
+    assert_eq!(
+        result,
+        Err(Ok(Error::Overflow)),
+        "submit_result must return Overflow when pot calculation overflows"
+    );
+}
