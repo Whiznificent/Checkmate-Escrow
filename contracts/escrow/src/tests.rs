@@ -1647,3 +1647,29 @@ fn test_get_escrow_balance_returns_match_not_found_for_nonexistent_id() {
         "get_escrow_balance must return MatchNotFound for a non-existent match_id"
     );
 }
+
+#[test]
+fn test_submit_result_overflow_returns_error() {
+    let (env, contract_id, oracle, player1, player2, token, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let asset_client = StellarAssetClient::new(&env, &token);
+
+    let stake = i128::MAX / 2 + 1;
+    asset_client.mint(&player1, &stake);
+    asset_client.mint(&player2, &stake);
+
+    let id = client.create_match(
+        &player1,
+        &player2,
+        &stake,
+        &token,
+        &String::from_str(&env, "overflow_test"),
+        &Platform::Lichess,
+    );
+
+    client.deposit(&id, &player1);
+    client.deposit(&id, &player2);
+
+    let result = client.try_submit_result(&id, &Winner::Player1, &oracle);
+    assert_eq!(result, Err(Ok(Error::Overflow)));
+}
