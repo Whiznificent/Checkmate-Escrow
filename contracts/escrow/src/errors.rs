@@ -18,4 +18,7 @@ pub enum Error {
     DuplicateGameId = 13,
     MatchNotExpired = 14,
     InvalidGameId = 15,
+    /// The match_id was once valid but its storage entry has been evicted
+    /// (TTL elapsed). The match existed but is no longer accessible on-chain.
+    MatchStorageExpired = 16,
 }

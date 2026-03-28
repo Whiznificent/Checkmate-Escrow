@@ -1647,3 +1647,36 @@ fn test_get_escrow_balance_returns_match_not_found_for_nonexistent_id() {
         "get_escrow_balance must return MatchNotFound for a non-existent match_id"
     );
 }
+
+#[test]
+fn test_get_match_distinguishes_never_created_from_storage_expired() {
+    let (env, contract_id, _oracle, player1, player2, token, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Create match id=0 so MatchCount becomes 1
+    client.create_match(
+        &player1,
+        &player2,
+        &100,
+        &token,
+        &String::from_str(&env, "expire_test"),
+        &Platform::Lichess,
+    );
+
+    // Simulate TTL eviction by removing the persistent entry directly
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::Match(0u64));
+    });
+
+    // match_id=0 was allocated (MatchCount=1) but entry is gone → MatchStorageExpired
+    assert!(
+        matches!(client.try_get_match(&0u64), Err(Ok(Error::MatchStorageExpired))),
+        "known match_id with evicted storage must return MatchStorageExpired"
+    );
+
+    // match_id=1 was never allocated → MatchNotFound
+    assert!(
+        matches!(client.try_get_match(&1u64), Err(Ok(Error::MatchNotFound))),
+        "never-created match_id must return MatchNotFound"
+    );
+}

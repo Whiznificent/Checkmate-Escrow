@@ -19,6 +19,38 @@ const MATCH_TTL_LEDGERS: u32 = 518_400;
 /// Both formats fit well within this limit.
 const MAX_GAME_ID_LEN: u32 = 64;
 
+/// Load a match from persistent storage, distinguishing between a match that
+/// was never created and one whose storage entry has been evicted (TTL lapsed).
+///
+/// # How it works
+/// `MatchCount` is stored in *instance* storage (which has a much longer
+/// effective lifetime than persistent entries). If `match_id < MatchCount` the
+/// ID was once allocated, so a missing persistent entry means the TTL elapsed
+/// and the entry was evicted — `Error::MatchStorageExpired` is returned.
+/// If `match_id >= MatchCount` the ID was never issued — `Error::MatchNotFound`
+/// is returned.
+///
+/// # Limitation
+/// This heuristic cannot distinguish an evicted entry from one that was
+/// manually deleted (which is not possible through the public API, but could
+/// happen via low-level ledger operations). In practice, for this contract,
+/// a missing persistent entry for a known ID always means TTL eviction.
+fn load_match(env: &Env, match_id: u64) -> Result<types::Match, Error> {
+    if let Some(m) = env.storage().persistent().get(&DataKey::Match(match_id)) {
+        return Ok(m);
+    }
+    let count: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::MatchCount)
+        .unwrap_or(0);
+    if match_id < count {
+        Err(Error::MatchStorageExpired)
+    } else {
+        Err(Error::MatchNotFound)
+    }
+}
+
 #[contract]
 pub struct EscrowContract;
 
@@ -165,11 +197,7 @@ impl EscrowContract {
             return Err(Error::ContractPaused);
         }
 
-        let mut m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let mut m: Match = load_match(&env, match_id)?;
 
         if m.state == MatchState::Cancelled {
             return Err(Error::MatchCancelled);
@@ -249,11 +277,7 @@ impl EscrowContract {
         }
         caller.require_auth();
 
-        let mut m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let mut m: Match = load_match(&env, match_id)?;
 
         if m.state != MatchState::Active {
             return Err(Error::InvalidState);
@@ -294,11 +318,7 @@ impl EscrowContract {
     /// Cancel a pending match and refund any deposits.
     /// Either player can cancel a pending match.
     pub fn cancel_match(env: Env, match_id: u64, caller: Address) -> Result<(), Error> {
-        let mut m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let mut m: Match = load_match(&env, match_id)?;
 
         if m.state != MatchState::Pending {
             return Err(Error::InvalidState);
@@ -344,11 +364,7 @@ impl EscrowContract {
     /// Expire a pending match that has not been fully funded within MATCH_TIMEOUT_LEDGERS.
     /// Anyone can call this; funds are returned to whoever deposited.
     pub fn expire_match(env: Env, match_id: u64) -> Result<(), Error> {
-        let mut m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let mut m: Match = load_match(&env, match_id)?;
 
         if m.state != MatchState::Pending {
             return Err(Error::InvalidState);
@@ -396,11 +412,14 @@ impl EscrowContract {
     }
 
     /// Read a match by ID.
+    ///
+    /// # Errors
+    /// - `Error::MatchNotFound` — the `match_id` was never allocated.
+    /// - `Error::MatchStorageExpired` — the `match_id` was once valid but its
+    ///   persistent storage entry has been evicted (TTL elapsed). The match
+    ///   existed on-chain but is no longer accessible.
     pub fn get_match(env: Env, match_id: u64) -> Result<Match, Error> {
-        let m = env.storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let m = load_match(&env, match_id)?;
         env.storage().persistent().extend_ttl(
             &DataKey::Match(match_id),
             MATCH_TTL_LEDGERS,
@@ -411,21 +430,13 @@ impl EscrowContract {
 
     /// Check whether both players have deposited.
     pub fn is_funded(env: Env, match_id: u64) -> Result<bool, Error> {
-        let m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let m: Match = load_match(&env, match_id)?;
         Ok(m.player1_deposited && m.player2_deposited)
     }
 
     /// Return the total escrowed balance for a match (0, 1x, or 2x stake).
     pub fn get_escrow_balance(env: Env, match_id: u64) -> Result<i128, Error> {
-        let m: Match = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Match(match_id))
-            .ok_or(Error::MatchNotFound)?;
+        let m: Match = load_match(&env, match_id)?;
         if m.state == MatchState::Completed || m.state == MatchState::Cancelled {
             return Ok(0);
         }
