@@ -21,10 +21,35 @@ impl OracleContract {
             panic!("Contract already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
         env.events().publish(
             (Symbol::new(&env, "oracle"), symbol_short!("init")),
             admin,
         );
+    }
+
+    /// Pause the oracle — admin only. Blocks submit_result.
+    pub fn pause(env: Env) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    /// Unpause the oracle — admin only.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+        Ok(())
     }
 
     /// Admin submits a verified match result on-chain.
@@ -40,6 +65,15 @@ impl OracleContract {
         result: MatchResult,
         escrow: Address,
     ) -> Result<(), Error> {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+        {
+            return Err(Error::ContractPaused);
+        }
+
         let admin: Address = env
             .storage()
             .instance()
@@ -497,5 +531,25 @@ mod tests {
 
         let entry = client.get_result(&0u64);
         assert_eq!(entry.result, MatchResult::Player2Wins);
+    }
+
+    #[test]
+    fn test_submit_result_blocked_when_paused() {
+        let (env, contract_id, escrow_id, ..) = setup();
+        let client = OracleContractClient::new(&env, &contract_id);
+
+        client.pause();
+
+        let result = client.try_submit_result(
+            &0u64,
+            &String::from_str(&env, "test_game"),
+            &MatchResult::Player1Wins,
+            &escrow_id,
+        );
+        assert_eq!(
+            result,
+            Err(Ok(Error::ContractPaused)),
+            "submit_result must return ContractPaused when oracle is paused"
+        );
     }
 }
