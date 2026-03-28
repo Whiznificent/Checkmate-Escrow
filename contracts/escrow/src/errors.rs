@@ -13,6 +13,8 @@ pub enum Error {
     Overflow = 8,
     ContractPaused = 9,
     InvalidAmount = 10,
+    InvalidGameId = 11,
+    InvalidPlayers = 12,
     MatchCancelled = 11,
     MatchCompleted = 12,
     DuplicateGameId = 13,

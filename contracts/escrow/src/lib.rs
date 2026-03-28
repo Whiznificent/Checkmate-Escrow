@@ -184,6 +184,9 @@ impl EscrowContract {
         {
             return Err(Error::ContractPaused);
         }
+        if player1 == player2 {
+            return Err(Error::InvalidPlayers);
+        }
         if stake_amount <= 0 {
             return Err(Error::InvalidAmount);
         }
