@@ -401,6 +401,11 @@ impl EscrowContract {
             return Err(Error::InvalidState);
         }
 
+        // Defensive: the contract itself must never be accepted as a valid caller.
+        if caller == env.current_contract_address() {
+            return Err(Error::Unauthorized);
+        }
+
         // Either player1 or player2 can cancel a pending match
         let is_p1 = caller == m.player1;
         let is_p2 = caller == m.player2;

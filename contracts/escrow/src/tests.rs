@@ -2119,3 +2119,32 @@ fn test_get_match_returns_completed_state_draw() {
         "get_match must return Completed after Draw"
     );
 }
+
+// ── #191: cancel_match rejects the contract address as caller ─────────────────
+
+/// Passing env.current_contract_address() as the caller to cancel_match must
+/// return Unauthorized — the contract itself is never a valid canceller.
+#[test]
+fn test_cancel_match_rejects_contract_as_caller() {
+    let (env, contract_id, _oracle, player1, player2, token, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let id = client.create_match(
+        &player1,
+        &player2,
+        &100,
+        &token,
+        &String::from_str(&env, "contract_caller_cancel"),
+        &Platform::Lichess,
+    );
+
+    let result = client.try_cancel_match(&id, &contract_id);
+    assert_eq!(
+        result,
+        Err(Ok(Error::Unauthorized)),
+        "cancel_match must reject the contract address as caller"
+    );
+
+    // Match must remain Pending — no state change from the rejected call
+    assert_eq!(client.get_match(&id).state, MatchState::Pending);
+}
