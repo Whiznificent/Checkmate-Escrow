@@ -127,11 +127,21 @@ impl OracleContract {
     }
 
     /// Retrieve the stored result for a match.
+    ///
+    /// Extends the TTL of the stored result on read to prevent premature
+    /// eviction from repeated reads without new submissions.
     pub fn get_result(env: Env, match_id: u64) -> Result<ResultEntry, Error> {
-        env.storage()
+        let result = env
+            .storage()
             .persistent()
             .get(&DataKey::Result(match_id))
-            .ok_or(Error::ResultNotFound)
+            .ok_or(Error::ResultNotFound)?;
+        env.storage().persistent().extend_ttl(
+            &DataKey::Result(match_id),
+            MATCH_TTL_LEDGERS,
+            MATCH_TTL_LEDGERS,
+        );
+        Ok(result)
     }
 
     /// Check whether a result has been submitted for a match.
@@ -438,6 +448,39 @@ mod tests {
             env.storage().persistent().get_ttl(&DataKey::Result(0u64))
         });
         assert_eq!(ttl, crate::MATCH_TTL_LEDGERS);
+    }
+
+    #[test]
+    fn test_ttl_extended_on_get_result() {
+        let (env, contract_id, escrow_id, ..) = setup();
+        let client = OracleContractClient::new(&env, &contract_id);
+
+        // Submit initial result
+        client.submit_result(
+            &0u64,
+            &String::from_str(&env, "test_game"),
+            &MatchResult::Player1Wins,
+            &escrow_id,
+        );
+
+        // Get initial TTL after submission
+        let ttl_after_submit = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Result(0u64))
+        });
+        assert_eq!(ttl_after_submit, crate::MATCH_TTL_LEDGERS);
+
+        // Advance some ledgers to simulate time passing
+        env.ledger().set_sequence_number(100);
+
+        // Call get_result to read the entry
+        let retrieved = client.get_result(&0u64);
+        assert_eq!(retrieved.result, MatchResult::Player1Wins);
+
+        // Verify TTL has been extended (should be reset to MATCH_TTL_LEDGERS from current ledger)
+        let ttl_after_read = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Result(0u64))
+        });
+        assert_eq!(ttl_after_read, crate::MATCH_TTL_LEDGERS);
     }
 
     #[test]
