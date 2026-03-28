@@ -759,6 +759,41 @@ fn test_non_oracle_cannot_submit_result() {
 }
 
 #[test]
+fn test_non_oracle_gets_unauthorized_even_when_paused() {
+    let (env, contract_id, _oracle, player1, player2, token, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let id = client.create_match(
+        &player1,
+        &player2,
+        &100,
+        &token,
+        &String::from_str(&env, "game_unauth_oracle_paused"),
+        &Platform::Lichess,
+    );
+
+    client.deposit(&id, &player1);
+    client.deposit(&id, &player2);
+
+    // Pause the contract (admin is mocked via setup())
+    client.pause();
+
+    let impostor = Address::generate(&env);
+    let result = client.try_submit_result(&id, &Winner::Player1, &impostor);
+    assert_eq!(
+        result,
+        Err(Ok(Error::Unauthorized)),
+        "expected Unauthorized when non-oracle calls submit_result on a paused contract"
+    );
+
+    // Ensure no state change or payouts
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(client.get_match(&id).state, MatchState::Active);
+    assert_eq!(token_client.balance(&player1), 900);
+    assert_eq!(token_client.balance(&player2), 900);
+}
+
+#[test]
 fn test_submit_result_on_cancelled_match_returns_invalid_state() {
     let (env, contract_id, oracle, player1, player2, token, _admin) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);

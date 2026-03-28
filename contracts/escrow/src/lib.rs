@@ -309,7 +309,12 @@ impl EscrowContract {
         if caller != oracle {
             return Err(Error::Unauthorized);
         }
-        caller.require_auth();
+        // require the oracle's signature before any other checks (e.g. paused)
+        oracle.require_auth();
+
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(Error::ContractPaused);
+        }
 
         let mut m: Match = env
             .storage()
