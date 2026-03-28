@@ -1431,6 +1431,27 @@ fn test_create_match_with_oversized_game_id_fails() {
     );
 }
 
+#[test]
+fn test_create_match_with_empty_game_id_rejected() {
+    let (env, contract_id, _oracle, player1, player2, token, _admin) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let result = client.try_create_match(
+        &player1,
+        &player2,
+        &100,
+        &token,
+        &String::from_str(&env, ""),
+        &Platform::Lichess,
+    );
+
+    assert_eq!(
+        result,
+        Err(Ok(Error::InvalidGameId)),
+        "create_match must reject an empty game_id"
+    );
+}
+
 // ── deposit blocked when contract is paused ───────────────────────────────────
 
 #[test]

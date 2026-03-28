@@ -101,7 +101,7 @@ impl EscrowContract {
         if stake_amount <= 0 {
             return Err(Error::InvalidAmount);
         }
-        if game_id.len() > MAX_GAME_ID_LEN {
+        if game_id.len() == 0 || game_id.len() > MAX_GAME_ID_LEN {
             return Err(Error::InvalidGameId);
         }
 
