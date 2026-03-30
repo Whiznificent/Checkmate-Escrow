@@ -127,11 +127,22 @@ impl OracleContract {
     }
 
     /// Retrieve the stored result for a match.
+    ///
+    /// Extends the TTL of the result entry on every successful read so that
+    /// repeated reads (e.g. from the escrow contract) cannot cause the entry
+    /// to expire between `submit_result` and payout.
     pub fn get_result(env: Env, match_id: u64) -> Result<ResultEntry, Error> {
-        env.storage()
+        let entry = env
+            .storage()
             .persistent()
             .get(&DataKey::Result(match_id))
-            .ok_or(Error::ResultNotFound)
+            .ok_or(Error::ResultNotFound)?;
+        env.storage().persistent().extend_ttl(
+            &DataKey::Result(match_id),
+            MATCH_TTL_LEDGERS,
+            MATCH_TTL_LEDGERS,
+        );
+        Ok(entry)
     }
 
     /// Check whether a result has been submitted for a match.
@@ -420,6 +431,39 @@ mod tests {
 
         let result = client.try_get_result(&999u64);
         assert!(matches!(result, Err(Ok(Error::ResultNotFound))));
+    }
+
+    #[test]
+    fn test_ttl_extended_on_get_result() {
+        let (env, contract_id, escrow_id, ..) = setup();
+        let client = OracleContractClient::new(&env, &contract_id);
+
+        client.submit_result(
+            &0u64,
+            &String::from_str(&env, "test_game"),
+            &MatchResult::Player1Wins,
+            &escrow_id,
+        );
+
+        // Advance ledgers to partially consume the TTL
+        env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number: env.ledger().sequence() + 1000,
+            timestamp: env.ledger().timestamp() + 5000,
+            protocol_version: env.ledger().protocol_version(),
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 1,
+            min_persistent_entry_ttl: 1,
+            max_entry_ttl: MATCH_TTL_LEDGERS + 1,
+        });
+
+        // Reading the result should reset the TTL back to MATCH_TTL_LEDGERS
+        let _entry = client.get_result(&0u64);
+
+        let ttl = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Result(0u64))
+        });
+        assert_eq!(ttl, crate::MATCH_TTL_LEDGERS);
     }
 
     #[test]
